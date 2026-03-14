@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -43,6 +44,20 @@ def fix_text(text: str | None) -> str:
         return text
 
 
+def normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+
+    text = fix_text(text).lower()
+
+    text = re.sub(r"http\S+|www\.\S+", " ", text)
+    text = re.sub(r"@\w+", " ", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -59,6 +74,7 @@ def init_db():
             channel_name TEXT NOT NULL,
             telegram_message_id INTEGER NOT NULL,
             message_text TEXT,
+            normalized_text TEXT,
             media_path TEXT,
             media_type TEXT,
             status TEXT NOT NULL DEFAULT 'unconfirmed',
@@ -68,6 +84,11 @@ def init_db():
         )
     """)
 
+    try:
+        cursor.execute("ALTER TABLE posts ADD COLUMN normalized_text TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -76,6 +97,7 @@ def save_post(
     channel_name,
     telegram_message_id,
     message_text=None,
+    normalized_text=None,
     media_path=None,
     media_type=None,
     posted_at=None,
@@ -90,15 +112,17 @@ def save_post(
                 channel_name,
                 telegram_message_id,
                 message_text,
+                normalized_text,
                 media_path,
                 media_type,
                 status,
                 posted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             channel_name,
             telegram_message_id,
             message_text,
+            normalized_text,
             media_path,
             media_type,
             status,
@@ -152,10 +176,14 @@ async def telegram_check():
 @app.get("/db-test")
 def db_test():
     try:
+        test_text = "Test OSINT post"
+        test_normalized = normalize_text(test_text)
+
         save_post(
             channel_name="test_channel",
             telegram_message_id=1001,
-            message_text="Test OSINT post",
+            message_text=test_text,
+            normalized_text=test_normalized,
             media_path="media/test_channel/1001_1.jpg",
             media_type="image",
             posted_at="2026-03-13T12:00:00",
@@ -171,6 +199,7 @@ def db_test():
             "ok": True,
             "message": "Test post saved or ignored if duplicate",
             "post_count": row["count"],
+            "normalized_text": test_normalized,
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -206,11 +235,13 @@ async def channel_test():
                         media_type = "video"
 
                     clean_text = fix_text(message.text)
+                    normalized = normalize_text(clean_text)
 
                     save_post(
                         channel_name=channel_username,
                         telegram_message_id=message.id,
                         message_text=clean_text,
+                        normalized_text=normalized,
                         media_path=media_url,
                         media_type=media_type,
                         posted_at=str(message.date),
@@ -221,6 +252,7 @@ async def channel_test():
                             "id": message.id,
                             "date": str(message.date),
                             "text": clean_text,
+                            "normalized_text": normalized,
                             "media_type": media_type,
                             "media_url": media_url,
                         }
