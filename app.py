@@ -192,11 +192,23 @@ async def channel_test():
                 media_url = f"/media/{file_name}"
                 media_type = "video"
 
+            clean_text = fix_text(message.text)
+
+# Save to database
+            save_post(
+                channel_name=channel_username,
+                telegram_message_id=message.id,
+                message_text=clean_text,
+                media_path=media_url,
+                media_type=media_type,
+                posted_at=str(message.date),
+            )    
+
             messages.append(
-                {
+                {        
                     "id": message.id,
                     "date": str(message.date),
-                    "text": fix_text(message.text),
+                    "text": clean_text,
                     "media_type": media_type,
                     "media_url": media_url,
                 }
