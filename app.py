@@ -59,8 +59,10 @@ def normalize_text(text: str | None) -> str:
 
     return text
 
+
 def text_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
+
 
 def find_duplicate(normalized_text: str, hours=6, threshold=0.85):
     conn = get_db_connection()
@@ -86,6 +88,7 @@ def find_duplicate(normalized_text: str, hours=6, threshold=0.85):
             return row["id"]
 
     return None
+
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -264,8 +267,8 @@ async def channel_test():
                         media_type = "video"
 
                     clean_text = fix_text(message.text)
-                    duplicate_id = find_duplicate(normalized)
                     normalized = normalize_text(clean_text)
+                    duplicate_id = find_duplicate(normalized)
 
                     save_post(
                         channel_name=channel_username,
@@ -286,6 +289,7 @@ async def channel_test():
                             "normalized_text": normalized,
                             "media_type": media_type,
                             "media_url": media_url,
+                            "duplicate_of": duplicate_id,
                         }
                     )
 
