@@ -220,7 +220,7 @@ def db_test():
             media_type="image",
             posted_at="2026-03-13T12:00:00",
         )
-
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) AS count FROM posts")
@@ -233,6 +233,62 @@ def db_test():
             "post_count": row["count"],
             "normalized_text": test_normalized,
         }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/feed")
+def feed(limit: int = 50):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                channel_name,
+                telegram_message_id,
+                message_text,
+                normalized_text,
+                media_path,
+                media_type,
+                status,
+                posted_at,
+                created_at
+            FROM posts
+            WHERE status != 'duplicate'
+            ORDER BY posted_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        posts = []
+        for row in rows:
+            posts.append(
+                {
+                    "id": row["id"],
+                    "channel": row["channel_name"],
+                    "telegram_message_id": row["telegram_message_id"],
+                    "text": row["message_text"],
+                    "normalized_text": row["normalized_text"],
+                    "media_url": row["media_path"],
+                    "media_type": row["media_type"],
+                    "status": row["status"],
+                    "posted_at": row["posted_at"],
+                    "created_at": row["created_at"],
+                }
+            )
+
+        return {
+            "ok": True,
+            "count": len(posts),
+            "posts": posts,
+        }
+
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
