@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,6 +19,12 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 MEDIA_DIR = Path("/tmp/media")
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+DB_PATH = DATA_DIR / "osint.db"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 
@@ -28,6 +35,77 @@ def fix_text(text: str | None) -> str:
         return text.encode("latin1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):
         return text
+
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_name TEXT NOT NULL,
+            telegram_message_id INTEGER NOT NULL,
+            message_text TEXT,
+            media_path TEXT,
+            media_type TEXT,
+            status TEXT NOT NULL DEFAULT 'unconfirmed',
+            posted_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(channel_name, telegram_message_id, media_path)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def save_post(
+    channel_name,
+    telegram_message_id,
+    message_text=None,
+    media_path=None,
+    media_type=None,
+    posted_at=None,
+    status="unconfirmed",
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT OR IGNORE INTO posts (
+                channel_name,
+                telegram_message_id,
+                message_text,
+                media_path,
+                media_type,
+                status,
+                posted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            channel_name,
+            telegram_message_id,
+            message_text,
+            media_path,
+            media_type,
+            status,
+            posted_at,
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
 
 
 @app.get("/")
@@ -59,6 +137,33 @@ async def telegram_check():
             content={"ok": False, "error": str(e)},
             media_type="application/json; charset=utf-8",
         )
+
+
+@app.get("/db-test")
+def db_test():
+    try:
+        save_post(
+            channel_name="test_channel",
+            telegram_message_id=1001,
+            message_text="Test OSINT post",
+            media_path="media/test_channel/1001_1.jpg",
+            media_type="image",
+            posted_at="2026-03-13T12:00:00",
+        )
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) AS count FROM posts")
+        row = cursor.fetchone()
+        conn.close()
+
+        return {
+            "ok": True,
+            "message": "Test post saved or ignored if duplicate",
+            "post_count": row["count"],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/channel-test")
