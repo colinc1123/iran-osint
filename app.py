@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from difflib import SequenceMatcher
+
 
 app = FastAPI()
 
@@ -57,6 +59,33 @@ def normalize_text(text: str | None) -> str:
 
     return text
 
+def text_similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+def find_duplicate(normalized_text: str, hours=6, threshold=0.85):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, normalized_text
+        FROM posts
+        WHERE posted_at >= datetime('now', ?)
+        """,
+        (f"-{hours} hours",),
+    )
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    for row in rows:
+        existing_text = row["normalized_text"] or ""
+        similarity = text_similarity(normalized_text, existing_text)
+
+        if similarity >= threshold:
+            return row["id"]
+
+    return None
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -235,6 +264,7 @@ async def channel_test():
                         media_type = "video"
 
                     clean_text = fix_text(message.text)
+                    duplicate_id = find_duplicate(normalized)
                     normalized = normalize_text(clean_text)
 
                     save_post(
@@ -245,6 +275,7 @@ async def channel_test():
                         media_path=media_url,
                         media_type=media_type,
                         posted_at=str(message.date),
+                        status="duplicate" if duplicate_id else "unconfirmed",
                     )
 
                     messages.append(
